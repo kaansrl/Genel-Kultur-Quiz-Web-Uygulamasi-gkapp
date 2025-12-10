@@ -1,0 +1,8 @@
+# Genel Node çıktıları
+node_modules/
+dist/
+build/
+
+# Backend ve frontend ortam dosyaları
+backend/.env
+frontend/.env
