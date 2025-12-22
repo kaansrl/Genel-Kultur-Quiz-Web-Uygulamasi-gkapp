@@ -1,9 +1,24 @@
-Genel Kültür Quiz Web Uygulaması
+Genel Kültür Bilgi & Quiz Uygulaması:
 
-Bu proje, günlük yapay zekâ destekli genel kültür bilgileri ve zaman bazlı quiz sistemi içeren bir web uygulamasıdır.
-
-- Backend: Node.js, Express, PostgreSQL
+- Backend: Node.js + Express
 - Frontend: React
-- AI entegrasyonu: OpenAI (bilgi , quiz ve görsel üretimi)
+- Veritabanı: PostgreSQL (+ pgvector)
 
-Proje, akademik bir bitirme çalışması kapsamında geliştirilmiştir.
+Amaç:
+
+Günlük aktif bilgi üretimi
+Günün belirli saatlerinde quiz açılması
+Bilgilerin tekrar etmemesi için embedding + benzerlik kontrolü
+Kullanıcı bazlı XP, seviye, istatistik, leaderboard sistemi
+
+Zaman pencereleri:
+
+- Aktif bilginin açık olduğu saat
+- Quiz saatleri
+- Günlük bilginin pasif/okunabilir olduğu saat
+
+Teknik detaylar:
+
+- Cron job ile günlük bilgi üretimi
+- Quiz sonuçlarının localStorage + backend senkronu
+- Kullanıcı cevapları, doğruluk oranları, kategori bazlı analiz
