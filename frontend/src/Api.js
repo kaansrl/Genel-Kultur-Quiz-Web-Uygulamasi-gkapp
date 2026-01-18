@@ -7,15 +7,25 @@ const api = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
+// ✅ Helper: axios error içinden backend mesajını çek
+export function extractApiError(err) {
+  const status = err?.response?.status;
+  const data = err?.response?.data;
+  const message =
+    data?.message || data?.error || err?.message || "Bir hata oluştu.";
+  const code = data?.code || null;
+  return { status, code, message, data };
+}
+
 // --- Auth ---
 export async function register(data) {
   const res = await api.post("/auth/register", data);
-  return res.data; // { ok, user, error? }
+  return res.data;
 }
 
 export async function login(data) {
   const res = await api.post("/auth/login", data);
-  return res.data; // { ok, user, error? }
+  return res.data;
 }
 
 export async function me() {
@@ -39,10 +49,9 @@ export async function getGunlukBilgi(date) {
   return res.data;
 }
 
-// ✅ YENİ: Bilgi okundu → XP isteği
 export async function markBilgiOkundu(bilgiId) {
   const res = await api.post("/bilgiler/okundu", { bilgiId });
-  return res.data; // { ok, xpEarned }
+  return res.data;
 }
 
 // --- Quiz ---

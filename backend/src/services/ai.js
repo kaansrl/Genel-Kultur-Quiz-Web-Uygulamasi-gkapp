@@ -3,14 +3,12 @@ import OpenAI from "openai";
 
 function getClient() {
   const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error("OPENAI_API_KEY bulunamadı. .env dosyanı kontrol et.");
+  if (!apiKey) {
+    throw new Error("OPENAI_API_KEY bulunamadı. .env dosyanı kontrol et.");
+  }
   return new OpenAI({ apiKey });
 }
 
-// ==========================
-//  Eski: n adet bilgi üretir
-//  (İstersen hâlâ kullanabilirsin.)
-// ==========================
 export async function generateFacts(n = 6, avoidList = []) {
   const client = getClient();
 
@@ -110,10 +108,7 @@ ${avoidText}
     .slice(0, n);
 }
 
-// ==========================
-//  YENİ: Tek kategori için 1 bilgi
-//  generateAndStoreToday bunu kullanacak
-// ==========================
+
 export async function generateFactForCategory(kategori, avoidList = []) {
   const client = getClient();
 
@@ -180,7 +175,7 @@ ${avoidText}
   return text.trim();
 }
 
-// embedding vektörü üretir
+
 export async function embed(text) {
   const client = getClient();
   const res = await client.embeddings.create({
@@ -190,7 +185,7 @@ export async function embed(text) {
   return res.data[0].embedding;
 }
 
-// bir bilgi için 4 şıklı tek doğru cevaplı quiz sorusu üretir.
+
 export async function generateQuestionForFact(factText) {
   const client = getClient();
 
@@ -246,7 +241,7 @@ Kurallar:
   }
 }
 
-// (İstersen debug için tutabilirsin; şu an generateAndStoreToday bunu kullanmayacak)
+
 export async function classifyFactCategory(text) {
   const client = getClient();
 
@@ -256,16 +251,7 @@ Aşağıdaki genel kültür bilgisini EN UYGUN tek kategoriye göre sınıfland�
 Metin:
 """${text}"""
 
-Seçebileceğin kategoriler ve kısa açıklamaları:
-
-- Tarih: Tarihi olaylar, savaşlar, devrimler, anlaşmalar, anayasalar, eski uygarlıklar, tarihsel dönemler.
-- Bilim veya İcatlar: Doğa bilimleri, teknoloji, tıp, mühendislik, icatlar, keşifler, bilim insanları.
-- Sanat: Resim, heykel, mimari akımlar, tiyatro, opera, sinema, fotoğraf, tasarım okulları, sanatçılar.
-- Coğrafya: Ülkeler, bölgeler, dağlar, nehirler, iklimler, ekosistemler, jeolojik oluşumlar.
-- Edebiyat veya Dil: Romanlar, öyküler, şiirler, yazarlar, edebi akımlar, diller, alfabeler, dilbilim.
-- Spor veya Sağlık: Spor dalları, antrenman, egzersiz, beden eğitimi, olimpiyatlar, beslenme, genel sağlık bilgileri, yoga vb.
-
-KATEGORİ ADI OLARAK SADECE bu 6 değerden birini döndür:
+Seçebileceğin kategoriler:
 "Tarih", "Bilim veya İcatlar", "Sanat",
 "Coğrafya", "Edebiyat veya Dil", "Spor veya Sağlık".
 
@@ -294,3 +280,87 @@ Cevabı SADECE şu JSON formatında ver:
     return "Genel";
   }
 }
+
+
+export async function generateImageForBilgi(factText, kategori = "") {
+  const client = getClient();
+
+
+  const safeTopic = makeSafeTopic(factText, kategori);
+
+  const prompt = buildSafeImagePrompt(safeTopic, kategori);
+
+  try {
+    const res = await client.images.generate({
+      model: process.env.OPENAI_IMAGE_MODEL || "gpt-image-1",
+      prompt,
+      size: process.env.IMAGE_SIZE || "1024x1024",
+    });
+
+    const first = res?.data?.[0];
+    if (first?.url) return first.url;
+    if (first?.b64_json) return `data:image/png;base64,${first.b64_json}`;
+    return null;
+  } catch (e) {
+    const msg = String(e?.message || e);
+
+   
+    if (msg.includes("safety") || msg.includes("sexual")) {
+      const fallbackPrompt = `
+  Eğitici ve güvenli bir illüstrasyon üret.
+  Sahne: boş bir müze galerisi iç mekânı, uzaktan görünen çerçeveli tablolar, nötr ışık, yazı yok, insan yok.
+  Kurallar: çıplaklık yok, erotik yok, şiddet yok, logo/watermark yok.
+  Stil: dijital illüstrasyon, temiz kompozisyon.
+`.trim();
+
+      const res2 = await client.images.generate({
+        model: process.env.OPENAI_IMAGE_MODEL || "gpt-image-1",
+        prompt: fallbackPrompt,
+        size: process.env.IMAGE_SIZE || "1024x1024",
+      });
+
+      const first2 = res2?.data?.[0];
+      if (first2?.url) return first2.url;
+      if (first2?.b64_json) return `data:image/png;base64,${first2.b64_json}`;
+      return null;
+    }
+
+    throw e; 
+  }
+}
+
+// Helpers
+function makeSafeTopic(text = "", kategori = "") {
+  const t = String(text).replace(/\s+/g, " ").trim();
+
+  if (kategori === "Sanat") {
+    return "müze galerisi, çerçeveli tablolar, heykel kaidesi, nötr aydınlatma";
+  }
+  
+  const firstSentence = t.split(/[.!?]/)[0] || t;
+  return firstSentence.slice(0, 140);
+}
+
+function buildSafeImagePrompt(topic, kategori = "") {
+  return `
+Genel kültür uygulaması için güvenli bir illüstrasyon üret.
+
+Konu: ${kategori ? `[${kategori}] ` : ""}${topic}
+
+ZORUNLU KURALLAR:
+- Yazı, harf, altyazı, logo, watermark YOK.
+- İnsan çıplaklığı / erotik içerik YOK.
+- Çocuk figürü YOK.
+- Şiddet / kan / vahşet YOK.
+- Yüz/portre yerine: manzara, nesne, sembol, bina, harita, doğa, bilimsel objeler.
+
+Stil:
+- Dijital illüstrasyon, eğitici ve nötr, temiz kompozisyon, sinematik ışık.
+`.trim();
+}
+
+
+
+
+
+

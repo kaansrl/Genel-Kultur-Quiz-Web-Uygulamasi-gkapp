@@ -2,6 +2,7 @@
 import React from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import AuthProvider from "./AuthContext";
+import Leaderboard from "./pages/Leaderboard";
 
 import XpToast from "./components/XpToast";
 
@@ -24,19 +25,27 @@ export default function App() {
         <Navbar />
 
         <div className="app-container">
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
+         
+<Routes>
+  <Route path="/" element={<Home />} />
+  <Route path="/login" element={<Login />} />
+  <Route path="/register" element={<Register />} />
 
-            {/* 🔒 Oturum zorunlu alanlar */}
-            <Route element={<RequireAuth />}>
-              <Route path="/bilgiler/aktif" element={<BilgiAktif />} />
-              <Route path="/bilgiler/gunluk" element={<BilgiGunluk />} />
-              <Route path="/quiz" element={<Quiz />} />
-              <Route path="/istatistik" element={<Stats />} />
-            </Route>
-          </Routes>
+  {/* ✅ TEST: Leaderboard'u auth dışına aldık */}
+  <Route path="/leaderboard" element={<Leaderboard />} />
+
+  {/* 🔒 Oturum zorunlu alanlar */}
+  <Route element={<RequireAuth />}>
+    <Route path="/bilgiler/aktif" element={<BilgiAktif />} />
+    <Route path="/bilgiler/gunluk" element={<BilgiGunluk />} />
+    <Route path="/quiz" element={<Quiz />} />
+    <Route path="/istatistik" element={<Stats />} />
+  </Route>
+
+  {/* İstersen 404 */}
+  {/* <Route path="*" element={<div className="container">404</div>} /> */}
+</Routes>
+
         </div>
 
         {/* ✅ Her sayfada altta ortada görünen XP toast */}

@@ -1,11 +1,14 @@
 // backend/src/services/bilgiService.js
 import pool from "../db.js";
-import { generateFactForCategory, embed } from "./ai.js";
+import { generateFactForCategory, embed, generateImageForBilgi } from "./ai.js";
 
 // Eşik ayarlamaları
 const SIM_THRESHOLD = Number(process.env.SIM_THRESHOLD || "0.35");
 const MAX_RETRY = Number(process.env.GEN_MAX_RETRY || "5");
 const SIM_LOOKBACK_DAYS = Number(process.env.SIM_LOOKBACK_DAYS || "30");
+
+// Görsel üretim retry (istersen .env'e koy)
+const IMG_MAX_RETRY = Number(process.env.IMG_MAX_RETRY || "2");
 
 // Günlük slotlar (08:00 - 20:00)
 export function getTodaySlots(base = new Date()) {
@@ -41,14 +44,13 @@ async function recentTopicsForPrompt(days = SIM_LOOKBACK_DAYS) {
   const topics = rows
     .map((r) =>
       (r.icerik || "")
-        .split(/[.!?]/)[0] // ilk cümleyi al
-        .split(/\s+/) // kelimelere böl
-        .slice(0, 10) // ilk 10 kelime
+        .split(/[.!?]/)[0]
+        .split(/\s+/)
+        .slice(0, 10)
         .join(" ")
     )
     .filter(Boolean);
 
-  // Tekilleştir, ilk 80 tanesini al
   return Array.from(new Set(topics)).slice(0, 80);
 }
 
@@ -100,17 +102,26 @@ async function existsSameTextToday(text) {
   return rows.length > 0;
 }
 
+// ✅ Görsel üret (hata olursa null)
+async function tryGenerateImage(text) {
+  for (let i = 1; i <= IMG_MAX_RETRY; i++) {
+    try {
+      const url = await generateImageForBilgi(text);
+      if (url) return url;
+    } catch (e) {
+      console.error(`[image] generate try ${i} failed:`, e?.message || e);
+    }
+  }
+  return null;
+}
+
 // Bilgiyi ekle
-async function insertBilgi({ icerik, vec, start, end, kategori }) {
+async function insertBilgi({ icerik, vec, start, end, kategori, image_url }) {
   if (!Array.isArray(vec)) {
     try {
       vec = JSON.parse(vec);
     } catch {
-      console.error(
-        "Vektör JSON parse edilemedi, fallback:",
-        typeof vec,
-        vec?.slice?.(0, 60)
-      );
+      console.error("Vektör JSON parse edilemedi:", typeof vec);
       vec = [];
     }
   }
@@ -121,25 +132,30 @@ async function insertBilgi({ icerik, vec, start, end, kategori }) {
     INSERT INTO public.bilgiler (
       icerik,
       embedding_vector,
+      image_url,
       gorunur_baslangic,
       gorunur_bitis,
       olusturulma_tarihi,
       kategori
     )
-    VALUES ($1, $2::vector, $3, $4, NOW(), $5)
+    VALUES ($1, $2::vector, $3, $4, $5, NOW(), $6)
     RETURNING bilgi_id;
   `;
 
   const { rows } = await pool.query(q, [
     icerik,
     vectorParam,
+    image_url || null,
     start,
     end,
     kategori,
   ]);
+
   return rows[0]?.bilgi_id;
 }
 
+
+// Günlük bilgiler kontrol ederek oluşturma fonksiyonu
 // Günlük bilgiler kontrol ederek oluşturma fonksiyonu
 export async function generateAndStoreToday() {
   // Bugün daha önce bilgi üretilmiş mi?
@@ -174,6 +190,7 @@ export async function generateAndStoreToday() {
 
     let tries = 0;
     let text = "";
+    let imageUrl = null;
 
     while (true) {
       tries++;
@@ -220,12 +237,20 @@ export async function generateAndStoreToday() {
       }
 
       // Buraya geldiysek metni kabul ediyoruz
+      try {
+        // Image üretme işlemi
+        imageUrl = await generateImageForBilgi(text);
+      } catch (e) {
+        console.error("generateImageForBilgi hata (devam ediyorum):", e);
+      }
+
       const id = await insertBilgi({
         icerik: text,
         vec,
         start: slot.start,
         end: slot.end,
-        kategori, // ⚠️ Artık kategori doğrudan bizim verdiğimiz sabit string
+        kategori,
+        image_url: imageUrl, // Görsel URL'sini DB'ye ekle
       });
 
       inserted.push(id);
@@ -239,3 +264,4 @@ export async function generateAndStoreToday() {
     ids: inserted,
   };
 }
+

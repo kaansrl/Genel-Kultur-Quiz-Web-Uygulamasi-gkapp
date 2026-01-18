@@ -1,5 +1,4 @@
 // src/index.js
-
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -16,7 +15,7 @@ import bilgilerRoutes from "./routes/bilgiler.js";
 import quizlerRoutes from "./routes/quizler.js";
 import istatistikRoutes from "./routes/istatistik.js";
 
-// Route mount'ları
+// ✅ Route mount'ları SADECE burada
 app.use("/api/auth", authRoutes);
 app.use("/api/bilgiler", bilgilerRoutes);
 app.use("/api/quizler", quizlerRoutes);

@@ -1,61 +1,59 @@
 // src/pages/Stats.js
 import React, { useEffect, useState } from "react";
-import { getMyStats, getMyStatsComment, getLeaderboard } from "../Api";
+import { getMyStats, getMyStatsComment } from "../Api";
+import { getLevelInfo } from "../levelUtils";
+import { useAuth } from "../AuthContext";
 
+function clamp(n, a, b) {
+  return Math.max(a, Math.min(b, n));
+}
 
-import { getLevelInfo, LEVELS } from "../levelUtils";
-// src/pages/Stats.js
-
-import { useAuth } from "../AuthContext";   // ⬅️ yeni
-
-
-
-
-
-
+function getAccuracyLabel(oran, toplam) {
+  if (!toplam) return "—";
+  if (oran >= 85) return "Çok iyi";
+  if (oran >= 70) return "İyi";
+  if (oran >= 55) return "Orta";
+  return "Geliştirilebilir";
+}
 
 export default function Stats() {
-  const { setUser } = useAuth();  
+  const { setUser } = useAuth();
+
   const [loading, setLoading] = useState(true);
   const [loadingComment, setLoadingComment] = useState(true);
-  const [loadingLeaderboard, setLoadingLeaderboard] = useState(true);
   const [error, setError] = useState("");
   const [stats, setStats] = useState(null);
 
-  // yorumlar artık obje
   const [comments, setComments] = useState(null);
-  const [leaderboard, setLeaderboard] = useState([]);
 
   useEffect(() => {
     async function fetchAll() {
       try {
         const res = await getMyStats();
-        console.log("getMyStats response:", res);
 
         if (!res.ok) {
           setError(res.error || "İstatistikler yüklenemedi.");
           setLoading(false);
           setLoadingComment(false);
-          setLoadingLeaderboard(false);
           return;
         }
 
         setStats(res.stats);
+
+        // navbar XP senkron
         setUser((prev) =>
-  prev
-    ? {
-        ...prev,
-        xp: res.stats.xp,
-        seviye: res.stats.seviye,
-      }
-    : prev
-);
+          prev
+            ? {
+                ...prev,
+                xp: res.stats.xp,
+                seviye: res.stats.seviye,
+              }
+            : prev
+        );
+
         setLoading(false);
 
-        const [y, lb] = await Promise.all([
-          getMyStatsComment().catch(() => null),
-          getLeaderboard().catch(() => null),
-        ]);
+        const y = await getMyStatsComment().catch(() => null);
 
         if (y && y.ok) {
           setComments({
@@ -64,19 +62,16 @@ export default function Stats() {
             trend: y.trendComment || "",
           });
         }
-
-        if (lb && lb.ok) setLeaderboard(lb.leaderboard || []);
       } catch (e) {
         console.error("Stats fetch error:", e);
         setError("İstatistikler yüklenirken bir hata oluştu.");
       } finally {
         setLoadingComment(false);
-        setLoadingLeaderboard(false);
       }
     }
 
     fetchAll();
-  }, []);
+  }, [setUser]);
 
   // ---- loading / error / boş durumlar ----
   if (loading) {
@@ -110,7 +105,9 @@ export default function Stats() {
   }
 
   // ---- hesaplamalar ----
-  const { current, next, progress } = getLevelInfo(stats.xp);
+  const xp = stats.xp ?? 0;
+  const { current, next, progress } = getLevelInfo(xp);
+
   const toplam = stats.toplamSoru || 0;
   const dogru = stats.toplamDogru || 0;
   const yanlis = stats.toplamYanlis || 0;
@@ -119,304 +116,380 @@ export default function Stats() {
   const kategoriler = stats.kategoriler || [];
   const quizler = stats.quizler || [];
 
+  const accuracyLabel = getAccuracyLabel(oran, toplam);
+
   return (
     <div className="container">
-      {/* başlık */}
-<div
-  className="card"
-  style={{
-    marginBottom: 16,
-    textAlign: "center",
-    padding: "32px 0",
-  }}
->
-  <h1 className="h1" style={{ fontSize: 38, marginBottom: 4 }}>
-    İstatistiklerim
-  </h1>
-
-  <p
-    style={{
-      fontSize: 26,
-      fontWeight: 600,
-      margin: 0,
-    }}
-  >
-    {stats.kullaniciAdi || ""}
-  </p>
-</div>
-
-
-      {/* seviye & xp */}
-      <div className="card" style={{ marginTop: 16 }}>
-        <h2 className="h2">Seviye ve XP</h2>
-        <p>
-          Seviye: <strong>{stats.seviye}</strong>
-        </p>
-        <p>
-          Toplam XP: <strong>{stats.xp}</strong>
-        </p>
-
-        <div style={{ marginTop: 12 }}>
+      {/* HERO HEADER */}
+      <div
+        className="card"
+        style={{
+          marginBottom: 16,
+          padding: 26,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 18,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
           <div
             style={{
-              background: "#eee",
+              width: 54,
+              height: 54,
+              borderRadius: 16,
+              display: "grid",
+              placeItems: "center",
+              fontWeight: 800,
+              fontSize: 18,
+              background: "rgba(255,255,255,0.08)",
+              border: "1px solid rgba(255,255,255,0.10)",
+            }}
+            title={stats.kullaniciAdi || ""}
+          >
+            {(stats.kullaniciAdi || "U")[0]?.toUpperCase()}
+          </div>
+
+          <div>
+            <h1
+              className="h1"
+              style={{ margin: 0, fontSize: 34, lineHeight: 1.1 }}
+            >
+              İstatistiklerim
+            </h1>
+            <div style={{ marginTop: 6, opacity: 0.9, fontSize: 16 }}>
+              <strong>{stats.kullaniciAdi || ""}</strong> •{" "}
+              <strong>{stats.seviye}</strong>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* QUICK STATS GRID */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+          gap: 14,
+        }}
+      >
+        <div className="card" style={{ padding: 16 }}>
+          <div style={{ opacity: 0.75, fontSize: 13 }}>Toplam XP</div>
+          <div style={{ fontSize: 24, fontWeight: 800, marginTop: 6 }}>
+            {xp}
+          </div>
+          <div style={{ marginTop: 8, opacity: 0.8, fontSize: 13 }}>
+            Şu an: <strong>{current?.name}</strong>
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: 16 }}>
+          <div style={{ opacity: 0.75, fontSize: 13 }}>Seviye</div>
+          <div style={{ fontSize: 24, fontWeight: 800, marginTop: 6 }}>
+            {stats.seviye}
+          </div>
+          <div style={{ marginTop: 8, opacity: 0.8, fontSize: 13 }}>
+            İlerleme:{" "}
+            <strong>{clamp(progress, 0, 100).toFixed(0)}%</strong>
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: 16 }}>
+          <div style={{ opacity: 0.75, fontSize: 13 }}>Doğruluk</div>
+          <div style={{ fontSize: 24, fontWeight: 800, marginTop: 6 }}>
+            {toplam ? oran.toFixed(1) + "%" : "—"}
+          </div>
+          <div style={{ marginTop: 8, opacity: 0.8, fontSize: 13 }}>
+            Durum: <strong>{accuracyLabel}</strong>
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: 16 }}>
+          <div style={{ opacity: 0.75, fontSize: 13 }}>Toplam Soru</div>
+          <div style={{ fontSize: 24, fontWeight: 800, marginTop: 6 }}>
+            {toplam}
+          </div>
+          <div style={{ marginTop: 8, opacity: 0.8, fontSize: 13 }}>
+            <strong>{dogru}</strong> doğru • <strong>{yanlis}</strong> yanlış
+          </div>
+        </div>
+      </div>
+
+      {/* XP PROGRESS */}
+      <div className="card" style={{ marginTop: 16, padding: 18 }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          <h2 className="h2" style={{ margin: 0 }}>
+            Seviye İlerlemesi
+          </h2>
+          <div style={{ opacity: 0.8, fontSize: 14 }}>
+            {next ? (
+              <>
+                Sonraki: <strong>{next.name}</strong> ({next.minXp} XP)
+              </>
+            ) : (
+              <strong>En üst seviyedesin 🎉</strong>
+            )}
+          </div>
+        </div>
+
+        <div style={{ marginTop: 14 }}>
+          <div
+            style={{
+              height: 14,
               borderRadius: 999,
               overflow: "hidden",
-              height: 16,
+              background: "rgba(255,255,255,0.10)",
+              border: "1px solid rgba(255,255,255,0.10)",
             }}
           >
             <div
               style={{
-                width: `${progress}%`,
+                width: `${clamp(progress, 0, 100)}%`,
                 height: "100%",
-                background: "#4caf50",
+                background:
+                  "linear-gradient(90deg, rgba(120,120,255,0.9), rgba(80,220,255,0.9))",
               }}
             />
           </div>
+
           <div
             style={{
-              marginTop: 6,
-              fontSize: 14,
+              marginTop: 8,
               display: "flex",
               justifyContent: "space-between",
+              fontSize: 13,
+              opacity: 0.85,
+              gap: 10,
+              flexWrap: "wrap",
             }}
           >
             <span>
               {current.name} ({current.minXp} XP+)
             </span>
-            <span>
-              {next
-                ? `Sonraki seviye: ${next.name} (${next.minXp} XP)`
-                : "En üst seviyedesin 🎉"}
-            </span>
+            <span>{next ? `${xp} / ${next.minXp} XP` : `${xp} XP`}</span>
           </div>
         </div>
       </div>
 
-      {/* genel quiz performansı */}
-      <div className="card" style={{ marginTop: 16 }}>
-        <h2 className="h2">Quiz Performansı</h2>
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 16,
-            marginTop: 12,
-          }}
-        >
-          <div className="hero-hint">
-            Toplam soru: <strong>{toplam}</strong>
-          </div>
-          <div className="hero-hint">
-            Doğru: <strong>{dogru}</strong>
-          </div>
-          <div className="hero-hint">
-            Yanlış: <strong>{yanlis}</strong>
-          </div>
-          <div className="hero-hint">
-            Doğruluk oranı:{" "}
-            <strong>{toplam > 0 ? oran.toFixed(1) + " %" : "-"}</strong>
-          </div>
-        </div>
-      </div>
+      {/* KATEGORI + GECMIS QUIZ */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1.25fr 0.75fr",
+          gap: 16,
+          marginTop: 16,
+        }}
+      >
+        <div className="card" style={{ padding: 18 }}>
+          <h2 className="h2" style={{ marginTop: 0 }}>
+            Kategorilere Göre Genel Performans
+          </h2>
 
-      {/* kategorilere göre performans */}
-      {kategoriler.length > 0 && (
-        <div className="card" style={{ marginTop: 16 }}>
-          <h2 className="h2">Kategorilere Göre Performans</h2>
-          <div style={{ overflowX: "auto", marginTop: 12 }}>
-            <table
+          {kategoriler.length === 0 ? (
+            <p style={{ opacity: 0.85 }}>Henüz kategori verisi yok.</p>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {kategoriler.map((k) => {
+                const t = (k.dogru || 0) + (k.yanlis || 0);
+                const p = t > 0 ? (k.dogru / t) * 100 : 0;
+
+                return (
+                  <div
+                    key={k.kategori}
+                    style={{
+                      padding: 12,
+                      borderRadius: 14,
+                      background: "rgba(255,255,255,0.04)",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        gap: 10,
+                      }}
+                    >
+                      <div style={{ fontWeight: 700 }}>{k.kategori}</div>
+                      <div
+                        style={{
+                          opacity: 0.85,
+                          fontSize: 13,
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        <strong>{k.dogru}</strong> D • <strong>{k.yanlis}</strong>{" "}
+                        Y
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        marginTop: 8,
+                        height: 10,
+                        borderRadius: 999,
+                        overflow: "hidden",
+                        background: "rgba(255,255,255,0.10)",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: `${clamp(p, 0, 100)}%`,
+                          height: "100%",
+                          background:
+                            "linear-gradient(90deg, rgba(90,255,180,0.9), rgba(90,180,255,0.9))",
+                        }}
+                      />
+                    </div>
+
+                    <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>
+                      Doğruluk: <strong>{t ? p.toFixed(1) + "%" : "—"}</strong>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="card" style={{ padding: 18 }}>
+          <h2 className="h2" style={{ marginTop: 0 }}>
+            Geçmiş Quizler
+          </h2>
+
+          {quizler.length === 0 ? (
+            <p style={{ opacity: 0.85 }}>Henüz geçmiş quiz yok.</p>
+          ) : (
+            <div
               style={{
-                width: "100%",
-                borderCollapse: "collapse",
-                fontSize: 14,
+                display: "flex",
+                flexDirection: "column",
+                gap: 10,
+                maxHeight: 520,
+                overflowY: "auto",
+                paddingRight: 6,
               }}
             >
-              <thead>
-                <tr>
-                  <th
-                    style={{
-                      textAlign: "left",
-                      padding: "8px 4px",
-                      borderBottom: "1px solid rgba(255,255,255,0.1)",
-                    }}
-                  >
-                    Kategori
-                  </th>
-                  <th
-                    style={{
-                      textAlign: "right",
-                      padding: "8px 4px",
-                      borderBottom: "1px solid rgba(255,255,255,0.1)",
-                    }}
-                  >
-                    Doğru
-                  </th>
-                  <th
-                    style={{
-                      textAlign: "right",
-                      padding: "8px 4px",
-                      borderBottom: "1px solid rgba(255,255,255,0.1)",
-                    }}
-                  >
-                    Yanlış
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {kategoriler.map((k) => (
-                  <tr key={k.kategori}>
-                    <td style={{ padding: "6px 4px" }}>{k.kategori}</td>
-                    <td style={{ padding: "6px 4px", textAlign: "right" }}>
-                      {k.dogru}
-                    </td>
-                    <td style={{ padding: "6px 4px", textAlign: "right" }}>
-                      {k.yanlis}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+              {quizler.map((q, idx) => {
+                const dateStr = q.tarih
+                  ? new Date(q.tarih).toLocaleDateString("tr-TR")
+                  : "-";
+                const ratio =
+                  q.soru_sayisi > 0
+                    ? Math.round((q.dogru_sayisi / q.soru_sayisi) * 100)
+                    : null;
 
-      {/* geçmiş quizler */}
-      {quizler.length > 0 && (
-        <div className="card" style={{ marginTop: 16 }}>
-          <h2 className="h2">Geçmiş Quizler</h2>
-          <ul style={{ marginTop: 8, listStyle: "none", paddingLeft: 0 }}>
-            {quizler.map((q, idx) => {
-              const dateStr = q.tarih
-                ? new Date(q.tarih).toLocaleDateString("tr-TR")
-                : "-";
-              return (
-                <li
-                  key={idx}
-                  style={{
-                    padding: "6px 0",
-                    borderBottom:
-                      idx === quizler.length - 1
-                        ? "none"
-                        : "1px solid rgba(255,255,255,0.08)",
-                    fontSize: 14,
-                  }}
-                >
-                  <strong>{dateStr}</strong> –{" "}
-                  {q.dogru_sayisi}/{q.soru_sayisi} doğru
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      )}
+                return (
+                  <div
+                    key={idx}
+                    style={{
+                      padding: 12,
+                      borderRadius: 14,
+                      background: "rgba(255,255,255,0.04)",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        gap: 10,
+                      }}
+                    >
+                      <strong>{dateStr}</strong>
+                      <span style={{ opacity: 0.85, fontSize: 13 }}>
+                        {q.dogru_sayisi}/{q.soru_sayisi} doğru
+                      </span>
+                    </div>
 
-      {/* yapay zeka yorumları */}
-      <div className="card" style={{ marginTop: 16 }}>
-        <h2 className="h2">Yapay Zekâ Yorumu</h2>
+                    <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>
+                      Doğruluk:{" "}
+                      <strong>{ratio !== null ? `${ratio}%` : "—"}</strong>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* AI COMMENT */}
+      <div className="card" style={{ marginTop: 16, padding: 18 }}>
+        <h2 className="h2" style={{ marginTop: 0 }}>
+          Yapay Zekâ Yorumu
+        </h2>
+
         {loadingComment && <p>Yorum hazırlanıyor...</p>}
 
-        {!loadingComment && !comments && (
-          <p>Şu anda gösterilecek yorum yok.</p>
-        )}
+        {!loadingComment && !comments && <p>Şu anda gösterilecek yorum yok.</p>}
 
         {!loadingComment && comments && (
-          <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {comments.overall && (
-              <p>
+              <div
+                style={{
+                  padding: 12,
+                  borderRadius: 14,
+                  background: "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                }}
+              >
                 <strong>Genel durum:</strong> {comments.overall}
-              </p>
+              </div>
             )}
             {comments.today && (
-              <p>
+              <div
+                style={{
+                  padding: 12,
+                  borderRadius: 14,
+                  background: "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                }}
+              >
                 <strong>Bugün için:</strong> {comments.today}
-              </p>
+              </div>
             )}
             {comments.trend && (
-              <p>
+              <div
+                style={{
+                  padding: 12,
+                  borderRadius: 14,
+                  background: "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                }}
+              >
                 <strong>Son günlerin trendi:</strong> {comments.trend}
-              </p>
+              </div>
             )}
           </div>
         )}
       </div>
 
-      {/* liderlik tablosu */}
-      <div className="card" style={{ marginTop: 16, marginBottom: 32 }}>
-        <h2 className="h2">Liderlik Tablosu</h2>
-        {loadingLeaderboard && <p>Liderlik tablosu yükleniyor...</p>}
-
-        {!loadingLeaderboard && leaderboard.length === 0 && (
-          <p>Şu anda gösterilecek liderlik verisi yok.</p>
-        )}
-
-        {!loadingLeaderboard && leaderboard.length > 0 && (
-          <div style={{ overflowX: "auto", marginTop: 12 }}>
-            <table
-              style={{
-                width: "100%",
-                borderCollapse: "collapse",
-                fontSize: 14,
-              }}
-            >
-              <thead>
-                <tr>
-                  <th
-                    style={{
-                      textAlign: "left",
-                      padding: "8px 4px",
-                      borderBottom: "1px solid rgba(255,255,255,0.1)",
-                    }}
-                  >
-                    Sıra
-                  </th>
-                  <th
-                    style={{
-                      textAlign: "left",
-                      padding: "8px 4px",
-                      borderBottom: "1px solid rgba(255,255,255,0.1)",
-                    }}
-                  >
-                    Kullanıcı
-                  </th>
-                  <th
-                    style={{
-                      textAlign: "right",
-                      padding: "8px 4px",
-                      borderBottom: "1px solid rgba(255,255,255,0.1)",
-                    }}
-                  >
-                    XP
-                  </th>
-                  <th
-                    style={{
-                      textAlign: "right",
-                      padding: "8px 4px",
-                      borderBottom: "1px solid rgba(255,255,255,0.1)",
-                    }}
-                  >
-                    Seviye
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {leaderboard.map((u) => (
-                  <tr key={u.kullaniciId}>
-                    <td style={{ padding: "6px 4px" }}>{u.sira}</td>
-                    <td style={{ padding: "6px 4px" }}>{u.kullaniciAdi}</td>
-                    <td style={{ padding: "6px 4px", textAlign: "right" }}>
-                      {u.xp}
-                    </td>
-                    <td style={{ padding: "6px 4px", textAlign: "right" }}>
-                      {u.seviye}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      {/* Responsive */}
+      <style>{`
+        @media (max-width: 980px) {
+          .container > div[style*="grid-template-columns: 1.25fr"] {
+            grid-template-columns: 1fr !important;
+          }
+          .container > div[style*="grid-template-columns: repeat(4"] {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+          }
+        }
+        @media (max-width: 560px) {
+          .container > div[style*="grid-template-columns: repeat(4"] {
+            grid-template-columns: 1fr !important;
+          }
+        }
+      `}</style>
     </div>
   );
 }

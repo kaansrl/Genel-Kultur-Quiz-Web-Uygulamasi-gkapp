@@ -16,17 +16,47 @@ function getUserIdFromReq(req) {
   );
 }
 
+// 🕒 Zaman penceresi yardımcıları
+function minutesOfDay(d = new Date()) {
+  return d.getHours() * 60 + d.getMinutes();
+}
+function isWithinQuizWindow(d = new Date()) {
+  const m = minutesOfDay(d);
+  const start = 20 * 60; // 20:00
+  const end = 20 * 60 + 15; // 20:15
+  return m >= start && m < end;
+}
+function isAfterQuiz(d = new Date()) {
+  const m = minutesOfDay(d);
+  const end = 20 * 60 + 15; // 20:15
+  return m >= end;
+}
+
 // Yanıta dahil edeceğimiz kolonlar (embedding yok)
 const PUBLIC_COLS = `
-  bilgi_id, icerik, gorunur_baslangic, gorunur_bitis, olusturulma_tarihi
+  bilgi_id,
+  icerik,
+  image_url,
+  gorunur_baslangic,
+  gorunur_bitis,
+  olusturulma_tarihi
 `;
 
 // Basit ping (mount oldu mu testi)
 router.get("/__ping", (req, res) => res.json({ ok: true }));
 
 // 🔹 O an görünür olan bilgi (embedding dönmez)
+// ✅ Quiz penceresinde KAPALI
 router.get("/aktif", async (req, res) => {
   try {
+    if (isWithinQuizWindow()) {
+      return res.status(403).json({
+        ok: false,
+        code: "QUIZ_WINDOW",
+        message: "Quiz sırasında görünür bilgi geçici olarak kapalıdır.",
+      });
+    }
+
     const q = `
       SELECT ${PUBLIC_COLS}
       FROM public.bilgiler
@@ -37,7 +67,6 @@ router.get("/aktif", async (req, res) => {
     `;
     const { rows } = await pool.query(q);
     res.set("Cache-Control", "no-store");
-    // Frontend bu endpoint'ten direkt bilgi objesi bekliyor
     res.json(rows[0] || null);
   } catch (err) {
     console.error("GET /api/bilgiler/aktif", err);
@@ -45,9 +74,19 @@ router.get("/aktif", async (req, res) => {
   }
 });
 
-// 🔹 Bugünün 6 bilgisi (opsiyonel ?date=YYYY-MM-DD) — embedding dönmez
+// 🔹 Bugünün 6 bilgisi (opsiyonel ?date=YYYY-MM-DD)
+// ✅ Quiz bitene kadar KAPALI (20:15 sonrası açılır)
 router.get("/gunluk", async (req, res) => {
   try {
+    if (!isAfterQuiz()) {
+      return res.status(403).json({
+        ok: false,
+        code: "LOCKED_UNTIL_AFTER_QUIZ",
+        message:
+          "Günün bilgileri quizden sonra açılacak. Quiz bitince bugün üretilen tüm bilgileri burada bulabileceksin!",
+      });
+    }
+
     const { date } = req.query;
     const q = `
       SELECT ${PUBLIC_COLS}
@@ -57,7 +96,6 @@ router.get("/gunluk", async (req, res) => {
     `;
     const { rows } = await pool.query(q, [date || null]);
     res.set("Cache-Control", "no-store");
-    // Frontend burada da direkt array bekliyor
     res.json(rows);
   } catch (err) {
     console.error("GET /api/bilgiler/gunluk", err);
@@ -77,8 +115,17 @@ router.post("/admin/uret", async (req, res) => {
 });
 
 // 🟩 Bilgi okundu → XP bonusu
+// ✅ Quiz penceresinde KAPALI (istersen açık bırakabiliriz ama mantıklısı kapatmak)
 router.post("/okundu", async (req, res) => {
   try {
+    if (isWithinQuizWindow()) {
+      return res.status(403).json({
+        ok: false,
+        code: "QUIZ_WINDOW",
+        message: "Quiz sırasında bilgi okuma XP işlemi kapalıdır.",
+      });
+    }
+
     const kullaniciId = getUserIdFromReq(req);
     if (!kullaniciId) {
       return res.status(401).json({ ok: false, error: "Oturum bulunamadı" });
@@ -89,7 +136,6 @@ router.post("/okundu", async (req, res) => {
       return res.status(400).json({ ok: false, error: "bilgiId gerekli" });
     }
 
-    // addFactReadXp, daha önce bu kullanıcı + bilgi için XP verildiyse 0 dönebilir
     const xpEarned = await addFactReadXp(kullaniciId, bilgiId);
 
     res.json({

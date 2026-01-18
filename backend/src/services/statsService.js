@@ -6,10 +6,7 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-/* -------------------------------------------------
-   SABİT KATEGORİLER (ÖNEMLİ!)
-   Backend artık sadece bu 6 kategoriye izin verir.
---------------------------------------------------- */
+
 const FIXED_CATEGORIES = [
   "Tarih",
   "Bilim veya İcatlar",
@@ -19,13 +16,11 @@ const FIXED_CATEGORIES = [
   "Spor veya Sağlık",
 ];
 
-/**
- * Belirli bir kullanıcı için istatistikleri getirir.
- */
+
 export async function getUserStats(kullaniciId) {
   if (!kullaniciId) return null;
 
-  // 1) Kullanıcı temel bilgileri
+
   const baseQ = `
     SELECT kullanici_adi,
            COALESCE(xp, 0)           AS xp,
@@ -37,7 +32,6 @@ export async function getUserStats(kullaniciId) {
   if (baseRows.length === 0) return null;
   const base = baseRows[0];
 
-  // 2) Kullanıcının kategori bazlı doğru/yanlışları
   const kategoriQ = `
     SELECT
       COALESCE(b.kategori, 'Diğer') AS kategori,
@@ -114,9 +108,6 @@ export async function getUserStats(kullaniciId) {
   };
 }
 
-/* -------------------------------------------------------
-   YORUM ÜRETİCİ
--------------------------------------------------------- */
 export async function getUserStatsComment(kullaniciId) {
   const stats = await getUserStats(kullaniciId);
   if (!stats) {
@@ -194,10 +185,7 @@ export async function getUserStatsComment(kullaniciId) {
   };
 }
 
-/* ----------------------------------------------
-   LİDERLİK TABLOSU
----------------------------------------------- */
-// src/services/statsService.js  (EN ALTA EKLE / DÜZENLE)
+
 export async function getLeaderboard(limit = 20) {
   const q = `
     SELECT

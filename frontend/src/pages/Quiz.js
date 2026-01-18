@@ -1,25 +1,72 @@
-// src/pages/Quiz.js
-import React, { useEffect, useState } from "react";
-import { getTodayQuizStatus, submitTodayQuizAnswers } from "../Api";
-import { useAuth } from "../AuthContext"; // 🔹 XP güncellemek için
+import React, { useEffect, useMemo, useState } from "react";
+import {
+  getTodayQuizStatus,
+  submitTodayQuizAnswers,
+  extractApiError,
+} from "../Api";
+import { useAuth } from "../AuthContext";
+
+function minutesOfDay(d = new Date()) {
+  return d.getHours() * 60 + d.getMinutes();
+}
+
+function isAfterQuiz(d = new Date()) {
+  return minutesOfDay(d) >= 20 * 60 + 15; // 20:15 sonrası
+}
+
+const LS_KEY = "gk_last_quiz_result_v1";
+function todayKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+function saveQuizResult({ totalCorrect, totalQuestions }) {
+  try {
+    localStorage.setItem(
+      LS_KEY,
+      JSON.stringify({
+        date: todayKey(),
+        totalCorrect,
+        totalQuestions,
+        savedAt: new Date().toISOString(),
+      })
+    );
+  } catch {}
+}
+function readQuizResult() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    if (obj?.date !== todayKey()) return null;
+    return obj;
+  } catch {
+    return null;
+  }
+}
 
 export default function Quiz() {
-  const { setUser } = useAuth(); // 🔹 Navbar’daki XP barını güncellemek için
+  const { setUser } = useAuth();
+
+  const now = useMemo(() => new Date(), []);
+  const afterQuiz = isAfterQuiz(now);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  const [locked, setLocked] = useState(false);
+  const [lockMode, setLockMode] = useState("before"); // before | after
+  const [lockMessage, setLockMessage] = useState("");
+
   const [questions, setQuestions] = useState([]);
-  const [answers, setAnswers] = useState({}); // { soru_id: secenekIndex }
+  const [answers, setAnswers] = useState({});
   const [submitted, setSubmitted] = useState(false);
   const [showResultModal, setShowResultModal] = useState(false);
-  const [initialScore, setInitialScore] = useState(null); // backend'den gelen skor
+  const [initialScore, setInitialScore] = useState(null);
   const [alreadySolved, setAlreadySolved] = useState(false);
 
   useEffect(() => {
     async function fetchQuiz() {
       try {
         const data = await getTodayQuizStatus();
-        console.log("DEBUG getTodayQuizStatus:", data);
 
         if (!data.ok || !data.quiz) {
           setError("Bugün için quiz bulunamadı.");
@@ -35,7 +82,6 @@ export default function Quiz() {
             } catch {
               return null;
             }
-
             return {
               soru_id: s.soru_id,
               text: payload.soru,
@@ -52,27 +98,48 @@ export default function Quiz() {
           setAnswers(cevapMap);
           setSubmitted(true);
           setAlreadySolved(true);
-          setInitialScore(
-            typeof data.toplamDogru === "number" ? data.toplamDogru : null
-          );
+
+          const score =
+            typeof data.toplamDogru === "number" ? data.toplamDogru : null;
+          setInitialScore(score);
+
+          // ✅ bugün çözülü olan sonucu da kaydet
+          if (typeof score === "number") {
+            saveQuizResult({ totalCorrect: score, totalQuestions: prepared.length });
+          }
         }
-      } catch (e) {
-        console.error(e);
-        setError("Quiz yüklenirken bir hata oluştu.");
+      } catch (err) {
+        const e = extractApiError(err);
+
+        if (e.status === 403) {
+          setLocked(true);
+          setLockMode(afterQuiz ? "after" : "before");
+
+          if (afterQuiz) {
+            setLockMessage(
+              "Bugünün quiz’i tamamlandı. Yarın 20:00–20:15 arasında tekrar görüşmek üzere! ☺"
+            );
+          } else {
+            setLockMessage("Quiz henüz başlamadı. Akşamki mücadelede görüşürüz!");
+          }
+        } else {
+          console.error("Quiz hata:", e);
+          setError("Quiz yüklenirken bir hata oluştu.");
+        }
       } finally {
         setLoading(false);
       }
     }
 
     fetchQuiz();
-  }, []);
+  }, [afterQuiz]);
 
   const handleSelect = (soruId, optionIdx) => {
     if (submitted) return;
     setAnswers((prev) => ({ ...prev, [soruId]: optionIdx }));
   };
 
-   const handleSubmit = async () => {
+  const handleSubmit = async () => {
     if (submitted) return;
 
     try {
@@ -83,52 +150,51 @@ export default function Quiz() {
         })
       );
 
-      console.log("DEBUG handleSubmit answerArray:", answerArray);
-
       if (answerArray.length === 0) {
         alert("Önce en az bir soru işaretlemelisin.");
         return;
       }
 
       const res = await submitTodayQuizAnswers(answerArray);
-      console.log("DEBUG submitTodayQuizAnswers response:", res);
 
       if (!res.ok) {
         setError(res.error || "Cevaplar gönderilirken bir hata oluştu.");
         return;
       }
 
-      // Eğer bugün zaten çözmüşse → XP verme, sadece sonucu göster
+      // Sonuç
+      const totalQuestions = questions.length;
+      const totalCorrect =
+        typeof res.toplamDogru === "number"
+          ? res.toplamDogru
+          : answerArray.reduce((acc, a) => {
+              const q = questions.find((qq) => qq.soru_id === a.soru_id);
+              return acc + (q && a.secilenIndex === q.correctIndex ? 1 : 0);
+            }, 0);
+
+      // ✅ sonucu kaydet (20:15 sonrası kapanış ekranında göstermek için)
+      saveQuizResult({ totalCorrect, totalQuestions });
+
       if (res.alreadyAnswered) {
         setSubmitted(true);
         setAlreadySolved(true);
-        if (typeof res.toplamDogru === "number") {
-          setInitialScore(res.toplamDogru);
-        }
+        setInitialScore(totalCorrect);
         setShowResultModal(true);
         return;
       }
 
-      // 🔹 Kaç XP kazandık? (backend xpEarned döndürüyor)
       const bonus =
         typeof res.xpEarned === "number"
           ? res.xpEarned
-          : typeof res.toplamDogru === "number"
-          ? res.toplamDogru * 5 // yedek: soru başı 5 XP
+          : typeof totalCorrect === "number"
+          ? totalCorrect * 5
           : 0;
 
       if (bonus > 0) {
-        // ✅ Navbar’daki XP barını güncelle
         setUser((prev) =>
-          prev
-            ? {
-                ...prev,
-                xp: (prev.xp ?? 0) + bonus,
-              }
-            : prev
+          prev ? { ...prev, xp: (prev.xp ?? 0) + bonus } : prev
         );
 
-        // ✅ XP toast göster
         window.dispatchEvent(
           new CustomEvent("xp-toast", {
             detail: {
@@ -141,64 +207,74 @@ export default function Quiz() {
 
       setSubmitted(true);
       setAlreadySolved(true);
-      if (typeof res.toplamDogru === "number") {
-        setInitialScore(res.toplamDogru);
-      }
+      setInitialScore(totalCorrect);
       setShowResultModal(true);
-    } catch (e) {
-      console.error(e);
+    } catch (err) {
+      const e = extractApiError(err);
+      if (e.status === 403) {
+        setLocked(true);
+        setLockMode(isAfterQuiz(new Date()) ? "after" : "before");
+        setLockMessage(
+          e.message || "Quiz şu an aktif değil. Quiz saati: 20:00–20:15"
+        );
+        return;
+      }
+      console.error("Submit hata:", e);
       setError("Cevaplar gönderilirken bir hata oluştu.");
     }
   };
-
-
-  const handleCloseModal = () => {
-    setShowResultModal(false);
-  };
-
-  const totalQuestions = questions.length;
-  let totalCorrect = 0;
-
-  if (submitted && initialScore !== null) {
-    totalCorrect = initialScore;
-  } else {
-    questions.forEach((q) => {
-      if (answers[q.soru_id] === q.correctIndex) {
-        totalCorrect += 1;
-      }
-    });
-  }
-
-  let resultTitle = "";
-  let resultText = "";
-
-  if (submitted) {
-    if (totalCorrect === totalQuestions) {
-      resultTitle = "Mükemmel! 🎉";
-      resultText = `${totalQuestions}'da ${totalCorrect} yaptın, harikasın!`;
-    } else if (totalCorrect === totalQuestions - 1) {
-      resultTitle = "Çok iyi! 👏";
-      resultText = `${totalQuestions}'da ${totalCorrect} yaptın, biraz daha dikkatle full gelebilirdi.`;
-    } else if (totalCorrect >= Math.floor(totalQuestions * 0.66)) {
-      resultTitle = "İyi iş! 💪";
-      resultText = `${totalQuestions}'da ${totalCorrect} yaptın, gayet iyi bir sonuç.`;
-    } else if (totalCorrect >= Math.floor(totalQuestions * 0.5)) {
-      resultTitle = "Fena değil 🙂";
-      resultText = `${totalQuestions}'da ${totalCorrect} yaptın, biraz daha pratikle çok daha iyi olur.`;
-    } else if (totalCorrect >= 1) {
-      resultTitle = "Denemek güzeldir 🌱";
-      resultText = `${totalQuestions}'da ${totalCorrect} yaptın, vazgeçme; tekrar dene!`;
-    } else {
-      resultTitle = "Bu sefer olmadı 😢";
-      resultText = `${totalQuestions}'da 0 yaptın, ama sorun değil; bilgi böyle böyle yerleşecek.`;
-    }
-  }
 
   if (loading) {
     return (
       <div className="container center">
         <div className="card hero">
           <p className="h2">Quiz yükleniyor...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (locked) {
+    const saved = readQuizResult();
+    const correct = saved?.totalCorrect;
+    const total = saved?.totalQuestions;
+    const wrong =
+      typeof correct === "number" && typeof total === "number"
+        ? total - correct
+        : null;
+
+    return (
+      <div className="container center">
+        <div className="card hero">
+          {lockMode === "after" ? (
+            <>
+              <p className="h1"> Bugünün Quiz’i Tamamlandı! </p>
+              <p className="h2" style={{ marginTop: 8 }}>
+                {lockMessage}
+              </p>
+
+              {typeof correct === "number" && typeof wrong === "number" && (
+                <div className="hero-hint" style={{ marginTop: 12 }}>
+                  Bugünkü sonuç: <strong>{correct} doğru</strong> /{" "}
+                  <strong>{wrong} yanlış</strong>
+                </div>
+              )}
+
+              <div className="hero-hint" style={{ marginTop: 10 }}>
+                Yarınki quiz: <strong>20:00 – 20:15</strong>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="h1">⏰ Quiz Henüz Başlamadı</p>
+              <p className="h2" style={{ marginTop: 8 }}>
+                {lockMessage}
+              </p>
+              <div className="hero-hint" style={{ marginTop: 10 }}>
+                Quiz saati: <strong>20:00 – 20:15</strong>
+              </div>
+            </>
+          )}
         </div>
       </div>
     );
@@ -212,6 +288,17 @@ export default function Quiz() {
         </div>
       </div>
     );
+  }
+
+  const totalQuestions = questions.length;
+  let totalCorrect = 0;
+
+  if (submitted && initialScore !== null) {
+    totalCorrect = initialScore;
+  } else {
+    questions.forEach((q) => {
+      if (answers[q.soru_id] === q.correctIndex) totalCorrect += 1;
+    });
   }
 
   return (
@@ -248,27 +335,17 @@ export default function Quiz() {
                 const isCorrectOption = q.correctIndex === oi;
 
                 let className = "quiz-option";
-
-                if (!submitted && userAnswer === oi) {
-                  className += " selected";
-                }
+                if (!submitted && userAnswer === oi) className += " selected";
 
                 if (submitted) {
                   if (userAnswer === undefined || userAnswer === null) {
-                    if (isCorrectOption) {
-                      className += " unanswered";
-                    }
+                    if (isCorrectOption) className += " unanswered";
                   } else if (userAnswer === q.correctIndex) {
-                    if (isCorrectOption && userAnswer === oi) {
+                    if (isCorrectOption && userAnswer === oi)
                       className += " correct";
-                    }
                   } else {
-                    if (userAnswer === oi) {
-                      className += " wrong";
-                    }
-                    if (isCorrectOption) {
-                      className += " unanswered";
-                    }
+                    if (userAnswer === oi) className += " wrong";
+                    if (isCorrectOption) className += " unanswered";
                   }
                 }
 
@@ -278,6 +355,7 @@ export default function Quiz() {
                     type="button"
                     className={className}
                     onClick={() => handleSelect(q.soru_id, oi)}
+                    disabled={submitted}
                   >
                     <span className="option-letter">
                       {String.fromCharCode(65 + oi)}.
@@ -312,12 +390,13 @@ export default function Quiz() {
         <div className="quiz-result-overlay">
           <div className="quiz-result-modal card">
             <h2 className="h1" style={{ marginBottom: 8 }}>
-              {resultTitle}
+              Tamamlandı!
             </h2>
             <p className="h2" style={{ marginBottom: 18 }}>
-              {resultText}
+              Bugün <strong>{totalCorrect}</strong> doğru yaptın. Yarınki quiz için tekrar
+              görüşmek üzere!
             </p>
-            <button className="btn" onClick={handleCloseModal}>
+            <button className="btn" onClick={() => setShowResultModal(false)}>
               Tamam
             </button>
           </div>

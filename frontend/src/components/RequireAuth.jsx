@@ -7,7 +7,16 @@ export default function RequireAuth() {
   const { user, loading } = useAuth();
   const location = useLocation();
 
-  if (loading) return null; // ya da küçük bir loader
+  if (loading) {
+  return (
+    <div className="container center">
+      <div className="card hero">
+        <p className="h2">Oturum kontrol ediliyor...</p>
+      </div>
+    </div>
+  );
+}
+ // ya da küçük bir loader
 
   // oturum yoksa login'e yönlendir
   if (!user) {

@@ -18,6 +18,17 @@ function getUserIdFromReq(req) {
   );
 }
 
+// 🕒 Quiz penceresi kontrolü
+function minutesOfDay(d = new Date()) {
+  return d.getHours() * 60 + d.getMinutes();
+}
+function isWithinQuizWindow(d = new Date()) {
+  const m = minutesOfDay(d);
+  const start = 20 * 60; // 20:00
+  const end = 20 * 60 + 15; // 20:15
+  return m >= start && m < end;
+}
+
 router.get("/__ping", (req, res) => {
   res.json({ ok: true, route: "quizler" });
 });
@@ -32,8 +43,17 @@ router.post("/admin/generate-today", async (req, res) => {
   }
 });
 
+// ✅ Quiz sadece 20:00–20:15 aktif
 router.get("/bugun", async (req, res) => {
   try {
+    if (!isWithinQuizWindow()) {
+      return res.status(403).json({
+        ok: false,
+        code: "QUIZ_NOT_ACTIVE",
+        message: "Quiz şu an aktif değil. Quiz saati: 20:00–20:15",
+      });
+    }
+
     const data = await getTodayQuizWithQuestions();
     if (!data) return res.json({ ok: true, quiz: null, sorular: [] });
     res.json({ ok: true, quiz: data.quiz, sorular: data.sorular });
@@ -43,8 +63,17 @@ router.get("/bugun", async (req, res) => {
   }
 });
 
+// ✅ Quiz sadece 20:00–20:15 aktif
 router.get("/bugun/durum", async (req, res) => {
   try {
+    if (!isWithinQuizWindow()) {
+      return res.status(403).json({
+        ok: false,
+        code: "QUIZ_NOT_ACTIVE",
+        message: "Quiz şu an aktif değil. Quiz saati: 20:00–20:15",
+      });
+    }
+
     const kullaniciId = getUserIdFromReq(req);
     if (!kullaniciId) {
       console.warn("GET /api/quizler/bugun/durum: kullaniciId yok");
@@ -68,8 +97,17 @@ router.get("/bugun/durum", async (req, res) => {
   }
 });
 
+// ✅ Quiz sadece 20:00–20:15 aktif
 router.post("/bugun/cevapla", async (req, res) => {
   try {
+    if (!isWithinQuizWindow()) {
+      return res.status(403).json({
+        ok: false,
+        code: "QUIZ_NOT_ACTIVE",
+        message: "Quiz şu an aktif değil. Quiz saati: 20:00–20:15",
+      });
+    }
+
     const kullaniciId = getUserIdFromReq(req);
     if (!kullaniciId) {
       console.warn("POST /api/quizler/bugun/cevapla: kullaniciId yok");
@@ -81,9 +119,7 @@ router.post("/bugun/cevapla", async (req, res) => {
     const { answers } = req.body;
     if (!Array.isArray(answers) || answers.length === 0) {
       console.warn("POST /bugun/cevapla: answers boş veya array değil");
-      return res
-        .status(400)
-        .json({ ok: false, error: "answers boş olamaz" });
+      return res.status(400).json({ ok: false, error: "answers boş olamaz" });
     }
 
     const result = await saveTodayQuizAnswers({ kullaniciId, answers });

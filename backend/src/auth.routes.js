@@ -2,9 +2,16 @@
 import { Router } from "express";
 import bcrypt from "bcrypt";
 import pool from "./db.js";
-import { addDailyLoginXp } from "./services/xpService.js"; // 🟩 günlük giriş XP
+import { addDailyLoginXp } from "./services/xpService.js";
 
 const router = Router();
+
+// küçük yardımcı: session'ı kesin yazdır
+function saveSession(req) {
+  return new Promise((resolve, reject) => {
+    req.session.save((err) => (err ? reject(err) : resolve()));
+  });
+}
 
 // REGISTER
 router.post("/register", async (req, res) => {
@@ -19,9 +26,7 @@ router.post("/register", async (req, res) => {
       [eposta]
     );
     if (exist.rowCount > 0) {
-      return res
-        .status(409)
-        .json({ ok: false, error: "E-posta zaten kayıtlı" });
+      return res.status(409).json({ ok: false, error: "E-posta zaten kayıtlı" });
     }
 
     const hash = await bcrypt.hash(parola, 12);
@@ -34,7 +39,6 @@ router.post("/register", async (req, res) => {
 
     const u = ins.rows[0];
 
-    // 🟩 Kayıt olan kullanıcıya ilk gün giriş bonusu da verelim (opsiyonel ama güzel durur)
     let loginXp = 0;
     try {
       loginXp = await addDailyLoginXp(u.kullanici_id);
@@ -61,11 +65,10 @@ router.post("/register", async (req, res) => {
       statu: u.statu,
     };
 
-    res.json({
-      ok: true,
-      user: req.session.user,
-      loginXp, // istersen frontendde “hoş geldin, +5 XP!” diye gösterebilirsin
-    });
+    // ✅ KRİTİK: session store'a yazılmasını garanti et
+    await saveSession(req);
+
+    res.json({ ok: true, user: req.session.user, loginXp });
   } catch (e) {
     console.error(e);
     res.status(500).json({ ok: false, error: "Sunucu hatası" });
@@ -80,10 +83,7 @@ router.post("/login", async (req, res) => {
       return res.status(400).json({ ok: false, error: "Eksik alan" });
     }
 
-    const q = await pool.query(
-      "SELECT * FROM kullanicilar WHERE eposta=$1",
-      [eposta]
-    );
+    const q = await pool.query("SELECT * FROM kullanicilar WHERE eposta=$1", [eposta]);
     if (q.rowCount === 0) {
       return res.status(401).json({ ok: false, error: "Geçersiz giriş" });
     }
@@ -94,12 +94,10 @@ router.post("/login", async (req, res) => {
       return res.status(401).json({ ok: false, error: "Geçersiz giriş" });
     }
 
-    // 🟩 Günlük giriş XP bonusu
     let loginXp = 0;
     try {
       loginXp = await addDailyLoginXp(u.kullanici_id);
       if (loginXp > 0) {
-        // XP ve seviye DB'de güncellendi; son halini tekrar çekelim
         const q2 = await pool.query(
           "SELECT xp, seviye FROM kullanicilar WHERE kullanici_id=$1",
           [u.kullanici_id]
@@ -122,11 +120,10 @@ router.post("/login", async (req, res) => {
       statu: u.statu,
     };
 
-    res.json({
-      ok: true,
-      user: req.session.user,
-      loginXp, // frontend isterse popup gösterir, istemezse yok sayar
-    });
+    // ✅ KRİTİK: session store'a yazılmasını garanti et
+    await saveSession(req);
+
+    res.json({ ok: true, user: req.session.user, loginXp });
   } catch (e) {
     console.error(e);
     res.status(500).json({ ok: false, error: "Sunucu hatası" });
@@ -135,15 +132,15 @@ router.post("/login", async (req, res) => {
 
 // ME
 router.get("/me", (req, res) => {
-  if (!req.session.user)
-    return res.status(401).json({ ok: false, user: null });
+  if (!req.session.user) return res.status(401).json({ ok: false, user: null });
   res.json({ ok: true, user: req.session.user });
 });
 
 // LOGOUT
 router.post("/logout", (req, res) => {
   req.session.destroy(() => {
-    res.clearCookie("connect.sid");
+    // ✅ cookie'yi path ile temizle
+    res.clearCookie("connect.sid", { path: "/" });
     res.json({ ok: true });
   });
 });
